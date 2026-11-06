@@ -4,7 +4,7 @@
  * guard, and patch disposal.
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -181,4 +181,48 @@ test('a class-declared resolve is patched on the prototype, not the instance', (
   assert.deepEqual(viaFacade.additionalWritableRoots, [canonicalPath(secondary)], 'a facade must see the decoration')
   patch.dispose()
   assert.deepEqual(facade.resolve({ session: { header: { cwd: workspace } } }).additionalWritableRoots, undefined)
+})
+
+test('prune drops inadmissible grants and keeps the rest', () => {
+  const { base, workspace, secondary, statePath } = fixture()
+  const gone = join(base, 'gone')
+  mkdirSync(join(statePath, '..'), { recursive: true })
+  writeFileSync(statePath, JSON.stringify({ version: 1, workspaces: { [canonicalPath(workspace)]: [secondary, gone] } }))
+  const table = new RootTable(statePath)
+  table.load()
+  const result = table.prune()
+  assert.equal(result.dropped.length, 1)
+  assert.match(result.dropped[0].error, /无法读取目录/u)
+  assert.deepEqual(table.storedFor(workspace), [canonicalPath(secondary)])
+  const written = JSON.parse(readFileSync(statePath, 'utf8'))
+  assert.deepEqual(written.workspaces[canonicalPath(workspace)], [canonicalPath(secondary)])
+})
+
+test('prune --dry-run reports the drop list without touching the file', () => {
+  const { base, workspace, secondary, statePath } = fixture()
+  const gone = join(base, 'gone')
+  mkdirSync(join(statePath, '..'), { recursive: true })
+  writeFileSync(statePath, JSON.stringify({ version: 1, workspaces: { [canonicalPath(workspace)]: [secondary, gone] } }))
+  const table = new RootTable(statePath)
+  table.load()
+  const before = readFileSync(statePath, 'utf8')
+  const result = table.prune({ dryRun: true })
+  assert.equal(result.dryRun, true)
+  assert.equal(result.dropped.length, 1)
+  assert.equal(readFileSync(statePath, 'utf8'), before)
+  assert.deepEqual(table.storedFor(workspace), [secondary, gone])
+})
+
+test('prune never empties a workspace whose own directory is missing', () => {
+  const { base, secondary, statePath } = fixture()
+  const unmounted = join(base, 'unmounted')
+  mkdirSync(join(statePath, '..'), { recursive: true })
+  writeFileSync(statePath, JSON.stringify({ version: 1, workspaces: { [unmounted]: [secondary] } }))
+  const table = new RootTable(statePath)
+  table.load()
+  const result = table.prune()
+  assert.equal(result.dropped.length, 0)
+  assert.equal(result.skipped.length, 1)
+  assert.equal(result.changed, false)
+  assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).workspaces[unmounted], [secondary])
 })

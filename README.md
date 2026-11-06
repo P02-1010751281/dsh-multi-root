@@ -64,8 +64,12 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 /roots discover                    # 只读发现候选（编号列表）
 /roots adopt 3 7                   # 按编号采纳；也可用路径片段或 --all
 /roots check                       # 复验所有工作区的现有配置
+/roots prune                         # 移除所有工作区里已失效的副根（写审计）
+/roots prune --dry-run               # 只报告，不写盘
 /roots audit 20                    # 最近 20 条授权审计
 ```
+
+`/roots prune` 只删**已经失效**的条目（目录不存在、不再是物理目录、与其它根包含冲突）；工作区目录本身不存在时整条跳过，避免数据盘未挂载时把配置清空。
 
 改动**立即生效**，不用重启：每次工具调用都会重新解析 policy。
 
@@ -113,7 +117,7 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 ## 验证
 
 ```bash
-node --test test/          # 26 项：状态/准入/守卫/发现/采纳/命令处理器 测试 + 真实 bwrap 收敛矩阵
+node --test test/          # 30 项：状态/准入/守卫/发现/采纳/清理/命令处理器 测试 + 真实 bwrap 收敛矩阵
 ```
 
 `test/enforce.test.mjs` 不用模拟：它从已安装的 dsh 载荷里 import `LocalSandboxProvider` 与 `writableRoots`，用本插件产出的 policy 真正 spawn 受限进程，验证

@@ -140,3 +140,26 @@ test('the prompt contribution lists configured roots and stays empty otherwise',
   assert.match(contribution.text(session), /Secondary writable roots/u)
   assert.match(contribution.text(session), new RegExp(canonicalPath(sibling).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'))
 })
+
+test('prune removes stale grants, audits the change, and dry-run writes nothing', async () => {
+  const { base, project, sibling, statePath } = fixture()
+  const gone = join(base, 'gone')
+  mkdirSync(join(statePath, '..'), { recursive: true })
+  writeFileSync(statePath, JSON.stringify({ version: 1, workspaces: { [canonicalPath(project)]: [sibling, gone] } }))
+  const { ctx, commands } = fakeCtx()
+  apply(ctx, { statePath })
+  const roots = commands[0]
+
+  const dry = await invoke(roots, project, ' prune --dry-run')
+  assert.equal(dry.kind, 'success')
+  assert.match(dry.text, /将移除 1 条失效副根/u)
+  assert.equal(JSON.parse(readFileSync(statePath, 'utf8')).workspaces[canonicalPath(project)].length, 2)
+
+  const pruned = await invoke(roots, project, ' prune')
+  assert.equal(pruned.kind, 'success')
+  assert.match(pruned.text, /已移除 1 条失效副根/u)
+  assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).workspaces[canonicalPath(project)], [canonicalPath(sibling)])
+
+  const audit = await invoke(roots, project, ' audit 5')
+  assert.match(audit.text, /prune/u)
+})
