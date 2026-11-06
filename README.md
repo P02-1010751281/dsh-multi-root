@@ -25,6 +25,8 @@ ctx.sandboxPolicy.resolve(request)   ← 宿主服务，返回 { mode, workspace
 
 ## 安装
 
+公开仓库：<https://github.com/P02-1010751281/dsh-multi-root>（`git clone https://github.com/P02-1010751281/dsh-multi-root.git`；同一份历史也推送到自建 Forgejo）。
+
 ```bash
 # 1. 装进目标 profile（非桌面托管 profile 用 CLI；桌面 profile 见下）
 DSH_HOME=~/.dsh dsh plugin --profile web add /path/to/dsh-multi-root
