@@ -159,3 +159,26 @@ test('splitArgs keeps absolute paths intact', () => {
   assert.deepEqual(splitArgs('  add /a /b  '), ['add', '/a', '/b'])
   assert.deepEqual(splitArgs(''), [])
 })
+
+test('a class-declared resolve is patched on the prototype, not the instance', () => {
+  const { workspace, secondary, statePath } = fixture()
+  const table = new RootTable(statePath)
+  table.load()
+  table.setRoots(workspace, [secondary])
+  class PolicyService {
+    constructor(root) { this.root = root }
+    resolve(request = {}) {
+      return { mode: 'workspace-write', workspaceRoot: request.session?.header?.cwd ?? this.root }
+    }
+  }
+  const service = new PolicyService(workspace)
+  const facade = Object.create(service)      // cordis-style per-context view
+  const patch = installResolvePatch(service, table)
+  assert.equal(patch.applied, true)
+  assert.equal(Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(service), 'resolve'), true, 'patch must live on the prototype')
+  assert.equal(Object.prototype.hasOwnProperty.call(service, 'resolve'), false, 'the instance itself must stay clean')
+  const viaFacade = facade.resolve({ session: { header: { cwd: workspace } } })
+  assert.deepEqual(viaFacade.additionalWritableRoots, [canonicalPath(secondary)], 'a facade must see the decoration')
+  patch.dispose()
+  assert.deepEqual(facade.resolve({ session: { header: { cwd: workspace } } }).additionalWritableRoots, undefined)
+})
