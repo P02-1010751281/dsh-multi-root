@@ -43,11 +43,37 @@ DSH_HOME=~/.dsh dsh plugin --profile web add /path/to/dsh-multi-root
 /roots set /a /b                   # 整体替换
 /roots clear
 /roots reload                      # 手改了 JSON 之后重读
+/roots discover                    # 只读发现候选（编号列表）
+/roots adopt 3 7                   # 按编号采纳；也可用路径片段或 --all
+/roots check                       # 复验所有工作区的现有配置
+/roots audit 20                    # 最近 20 条授权审计
 ```
 
 改动**立即生效**，不用重启：每次工具调用都会重新解析 policy。
 
 带 `workdir` 的命令仍应写副根的**绝对路径**——会话 cwd 没变，这是设计而非缺陷。
+
+## 自动发现（C2）
+
+`/roots discover` 只读扫描三个来源，按可信度排序并**编号**：
+
+| 来源 | 判据 | 说明 |
+|---|---|---|
+| `worktree` | `git worktree list --porcelain` | 同一仓库的其它 worktree |
+| `code-workspace` | 工作区根下 `*.code-workspace` 的 `folders[]` | 相对路径按该文件所在目录解析 |
+| `sibling` | 工作区父目录里带 `.git` 的兄弟目录 | 「两个仓库并排」的真实布局 |
+
+**发现不等于授权**：编号列表只是候选，`/roots adopt 3 7` 才落盘，`--all` 要显式写。每个被采纳的候选都走与手输路径**完全相同**的准入校验，并且落一条 `audit.jsonl`（动作、工作区、来源、会话 id）。
+
+在真实工作区上的样子（app-a，30 个候选）：
+
+```
+ 1. ✅ ~/.codex/worktrees/0483/app-a   [worktree] 同一仓库的另一个 worktree
+ …
+16. ✅ /srv/work/apps/Projects/app-b     [sibling] 与工作区并列的 git 仓库
+```
+
+兄弟扫描会把 `app-b-item1…10` 这类克隆一起列出来——所以默认**不做 adopt-all**，只按编号挑。
 
 ## 准入规则（与宿主一致，且在 `/roots add` 时就拒绝）
 
@@ -69,7 +95,7 @@ DSH_HOME=~/.dsh dsh plugin --profile web add /path/to/dsh-multi-root
 ## 验证
 
 ```bash
-node --test test/          # 13 项：状态/准入/守卫单元测试 + 真实 bwrap 收敛矩阵
+node --test test/          # 25 项：状态/准入/守卫/发现/采纳/命令处理器 测试 + 真实 bwrap 收敛矩阵
 ```
 
 `test/enforce.test.mjs` 不用模拟：它从已安装的 dsh 载荷里 import `LocalSandboxProvider` 与 `writableRoots`，用本插件产出的 policy 真正 spawn 受限进程，验证
