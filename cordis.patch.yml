@@ -1,0 +1,7 @@
+# dsh-multi-root bundle patch.
+#
+# Inserts the plugin row at the profile root. Later layers (or the user's own
+# cordis.patch.yml) can address it by id with the last write winning.
+- insert:
+    - id: dsh-multi-root
+      name: 'dsh-multi-root'
