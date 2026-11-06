@@ -10,7 +10,9 @@
 set -euo pipefail
 
 PROFILE_DIR="${PROFILE_DIR:-$HOME/.dsh/profiles/desktop}"
-PLUGIN_PATH="${PLUGIN_PATH:-$HOME/Projects/dsh-multi-root}"
+# 默认指向脚本所在仓库的父目录：仓库搬家后脚本仍然指向自己，不依赖旧的 $HOME/Projects 布局。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_PATH="${PLUGIN_PATH:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 DRY="${DRY:-0}"
 SKIP_PNPM="${SKIP_PNPM:-0}"
 PKG="$PROFILE_DIR/package.json"
