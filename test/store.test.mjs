@@ -145,6 +145,12 @@ test('guardHit refuses tool calls that name the state directory', () => {
   const dir = canonicalPath(table.dir)
   assert.match(guardHit({ name: 'write', arguments: { file_path: join(dir, 'roots.json') } }, table), /拒绝访问/u)
   assert.match(guardHit({ name: 'bash', arguments: { command: `rm -rf ${dir}` } }, table), /拒绝访问/u)
+  assert.match(guardHit({ name: 'bash', arguments: { command: `echo x > ${dir}/roots.json` } }, table), /拒绝访问/u)
+  assert.match(guardHit({ name: 'bash', arguments: { command: `python3 -c 'open("${dir}/roots.json","w")'` } }, table), /拒绝访问/u)
+  // 只读诊断不能误伤：路径出现但命令没有写入形状时必须放行。
+  assert.equal(guardHit({ name: 'bash', arguments: { command: `ls -la ${dir}` } }, table), undefined)
+  assert.equal(guardHit({ name: 'bash', arguments: { command: `cat ${dir}/roots.json 2>/dev/null` } }, table), undefined)
+  assert.equal(guardHit({ name: 'bash', arguments: { command: `stat ${dir}` } }, table), undefined)
   assert.equal(guardHit({ name: 'write', arguments: { file_path: join(dir, '..', 'other.json') } }, table), undefined)
   assert.equal(guardHit({ name: 'bash', arguments: { command: 'ls /tmp' } }, table), undefined)
 })
