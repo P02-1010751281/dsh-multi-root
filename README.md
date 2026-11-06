@@ -34,6 +34,22 @@ DSH_HOME=~/.dsh dsh plugin --profile web add /path/to/dsh-multi-root
 
 桌面端（`~/.dsh/profiles/desktop`）被 Electron 独占，CLI 会拒绝写入；改 `package.json` 的 `dependencies` + `dsh.profile.bundles`，再用 profile 自己的 pnpm 安装，等价于插件管理器的操作。
 
+桌面 profile 有两条装法，按用途选：
+
+| 装法 | `dependencies` 里的写法 | 适合 |
+|---|---|---|
+| **仓库快照** | `"dsh-multi-root": "git+ssh://forgejo@<instance>/<owner>/dsh-multi-root.git"` | 日常使用：插件装在 profile 内，**不依赖源码目录或数据盘是否挂载** |
+| **本地链接** | `"dsh-multi-root": "link:/path/to/dsh-multi-root"`（`scripts/install-desktop.sh` 走这条） | 开发：改完代码重启宿主即可生效 |
+
+仓库快照模式下，改完代码要重新装一次再重启宿主：
+
+```bash
+git -C /path/to/dsh-multi-root push
+cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
+```
+
+> 沙箱内的 `ssh` 坑：DSH 的 bash 沙箱把宿主机的 root 属主显示成 `nobody`，OpenSSH 因此对 `/etc/ssh/ssh_config.d/*` 报 `Bad owner or permissions`（宿主机上没有这个问题）。在沙箱里跑 `git clone`/`pnpm add` 拉 SSH 依赖时加 `GIT_SSH_COMMAND='ssh -F ~/.ssh/config'`。
+
 ## 使用
 
 在目标工作区的任意会话里：
