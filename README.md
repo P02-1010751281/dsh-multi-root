@@ -53,6 +53,8 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 > 沙箱内的 `ssh` 坑：DSH 的 bash 沙箱把宿主机的 root 属主显示成 `nobody`，OpenSSH 因此对 `/etc/ssh/ssh_config.d/*` 报 `Bad owner or permissions`（宿主机上没有这个问题）。在沙箱里跑 `git clone`/`pnpm add` 拉 SSH 依赖时加 `GIT_SSH_COMMAND='ssh -F ~/.ssh/config'`。
 >
 > GitHub 的 22 端口在透明代理下会被拦（`Connection closed by <fake-ip> port 22`，时通时不通）。改用它的 443 端点：`ssh://git@ssh.github.com:443/<owner>/<repo>.git`，并 `git remote set-url --add --push` 让一次 push 同时到 Forgejo 与 GitHub。
+>
+> 双 pushurl 的代价：两条腿里任一条被掐，`git push` 整条命令都报失败，另一条其实可能已经成功。用 `bash scripts/push-both.sh` 逐条推 + `ls-remote` 校验（每条腿独立重试，失败退出码非 0），比生 `git push` 更适合这种网络。
 
 ## 使用
 

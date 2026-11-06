@@ -25,7 +25,7 @@
 
 ## 3 文件与目录约定
 
-- 布局固定：`lib/`（运行时）、`test/`（node:test）、`scripts/`（安装/卸载）、根 `README.md` + `cordis.patch.yml` + `package.json`。
+- 布局固定：`lib/`（运行时）、`test/`（node:test）、`scripts/`（安装/卸载/推送）、根 `README.md` + `cordis.patch.yml` + `package.json`。
   - why：宿主按 `package.json` 的 `exports`/`dsh.bundle` 约定加载，挪文件等于改安装契约。
 - 单文件单一职责，行数上限：
   - `lib/canonical.js` —— 只放路径规范化，当前 35 行，上限 80；
