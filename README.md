@@ -4,6 +4,8 @@
 
 宿主本来就有这个能力：`SandboxPolicyService.resolve()` 返回的 `additionalWritableRoots` 是一等字段，所有执行层（fs 围栏、bwrap/Landlock/Seatbelt、Windows ACL、`apply_patch`、PTC 子进程）都从同一个 policy 派生允许列表。缺的只是**按工作区配置**这一层，本插件只补这一层。
 
+> **宿主版本要求：dsh `0.2.2-rc.1` 及以上。** `additionalWritableRoots` 是 0.2.2-rc.1 才进 policy 契约的字段；0.2.1-rc.5 整棵代码树没有这个字段，插件能加载、`/roots` 命令能用，但执行层不会消费它——表现为「装了、配置了、还是写不进去」。这个差异在挂载时**无法从服务形状分辨**（旧宿主的 `mode`/`workspaceRoot` 形状完全兼容），所以它是硬性版本要求，不是可降级项。2026-11-06 在 0.2.1-rc.5 桌面上实测踩过：`additionalWritableRoots` 在 0.2.1-rc.5 全仓 0 命中、在 0.2.2-rc.1 有 55 个文件命中。
+
 ## 机制
 
 ```
@@ -19,7 +21,7 @@ ctx.sandboxPolicy.resolve(request)   ← 宿主服务，返回 { mode, workspace
 - **不重实现任何工具**，不改 `workspaceRoot`（会话 cwd 保持不动）。
 - 「根」是**列表**：一条命令可以同时写主根和所有副根，`git -C <副根> commit` 这种跨根操作成立。
 - 配置**沙箱外**：`$DSH_HOME/storages/dsh-multi-root/roots.json`（目录 0700、文件 0600），只有用户的斜杠命令写它，插件不提供 agent 工具。
-- 宿主版本契约变化时**拒绝加载**（启动即报错），不会静默失效。
+- 宿主**服务形状**变化时**拒绝加载**（启动即报错）；但「宿主更老、只是没有 `additionalWritableRoots` 字段」不在形状检查能覆盖的范围内，靠上面的版本要求兜底。
 
 ## 安装
 
@@ -95,7 +97,7 @@ DSH_HOME=~/.dsh dsh plugin --profile web add /path/to/dsh-multi-root
 ## 验证
 
 ```bash
-node --test test/          # 25 项：状态/准入/守卫/发现/采纳/命令处理器 测试 + 真实 bwrap 收敛矩阵
+node --test test/          # 26 项：状态/准入/守卫/发现/采纳/命令处理器 测试 + 真实 bwrap 收敛矩阵
 ```
 
 `test/enforce.test.mjs` 不用模拟：它从已安装的 dsh 载荷里 import `LocalSandboxProvider` 与 `writableRoots`，用本插件产出的 policy 真正 spawn 受限进程，验证
@@ -109,6 +111,8 @@ node --test test/          # 25 项：状态/准入/守卫/发现/采纳/命令�
 | D 另一个工作区 | 不继承 A 的副根 |
 
 `DSH_REPO` 可指定 dsh 载荷路径；缺省自动挑 `~/.local/share/dsh-desktop/*/repo` 里最新的一个。
+
+2026-11-06 在真桌面（dsh 0.2.2-rc.1）上验收：宿主自己的运行期上下文打印了 `Additional writable directories: [...]`；`bash` 带 `workdir` 与绝对路径写入均成功；`write` 工具写入并读回成功；对照的未授权兄弟仓库在 bwrap 与 fs 围栏两层都被拒；配置目录的只读命令放行，目标仓库无探针残留。
 
 ## 状态文件
 
