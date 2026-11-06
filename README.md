@@ -140,6 +140,18 @@ node --test test/          # 30 项：状态/准入/守卫/发现/采纳/清理/
 
 2026-11-06 在真桌面（dsh 0.2.2-rc.1）上验收：宿主自己的运行期上下文打印了 `Additional writable directories: [...]`；`bash` 带 `workdir` 与绝对路径写入均成功；`write` 工具写入并读回成功；对照的未授权兄弟仓库在 bwrap 与 fs 围栏两层都被拒；配置目录的只读命令放行，目标仓库无探针残留。
 
+同日晚模块拆分 + `prune` 之后的 0.1.3 重跑了一遍（桌面重启后、越过了运行期上下文这一层）：
+
+| 检查 | 结果 |
+|---|---|
+| 版本判据 | `/roots prune --dry-run` 返回 `没有失效副根`——`prune` 只有 0.1.3 有，且该文案是 `renderPrune()` 的唯一返回，能确认应答的是新代码 |
+| 宿主渲染 | 采纳副根后运行期上下文出现 `Additional writable directories: [...]` 与 `Secondary writable roots of this workspace: [...]` 两段（宿主读的是被包装的 `resolve()`） |
+| `bash`（bwrap） | 副根写入成功；未授权兄弟仓库 `只读文件系统` 被拒 |
+| `write` 工具（fs 围栏） | 副根写入并读回成功；未授权兄弟仓库 `[sandbox: file access denied under workspace-write mode]` |
+| 一条命令跨两处 | 同一会话同时写主根与副根，均成功 |
+| 审计与权限 | `audit.jsonl` 落了对应 `add` 记录；状态目录 0700、`roots.json`/`audit.jsonl` 0600 |
+| 残留 | 探针文件全部清除，主仓库与副根仓库 `git status` 均干净 |
+
 ## 状态文件
 
 ```json
