@@ -10,7 +10,7 @@
   - 判据：`node -e "const p=require('./package.json');process.exit(p.dependencies?1:0)"` 退出码 0。
 - 只做一件事：把「按工作区配置的副根」合进宿主 `sandboxPolicy.resolve()` 返回的 `additionalWritableRoots`。
   - why：一旦开始改宿主工具或换根，插件就从「补一层配置」变成「替换策略层」，宿主升级必崩。
-  - 判据：`grep -c additionalWritableRoots lib/index.js` 等于 5；`grep -rn 'registerTool\|defineTool\|addTool' lib/` 无输出（不实现任何工具）。
+  - 判据：`grep -c 'policy.additionalWritableRoots' lib/policy.js` 等于 1，且 `grep -rn additionalWritableRoots lib/state.js lib/commands.js lib/guard.js lib/discover.js lib/canonical.js` 无输出（只有 policy 层读这个字段）；`grep -rn 'registerTool\|defineTool\|addTool' lib/` 无输出（不实现任何工具）。
 - 宿主版本下限 dsh `0.2.2-rc.1`；更老的宿主没有这个 policy 字段，插件会「装上但静默无效」。
   - why：服务形状在旧宿主上完全兼容，加载期分辨不出来，只能靠硬性版本要求兜底（真机踩过）。
   - 判据：README 顶部的版本块存在，且 `node --test test/enforce.test.mjs` 能从 `DSH_REPO` 指向的载荷 import 真实 `LocalSandboxProvider` 后跑通。
@@ -30,7 +30,11 @@
 - 单文件单一职责，行数上限：
   - `lib/canonical.js` —— 只放路径规范化，当前 35 行，上限 80；
   - `lib/discover.js` —— 只放候选发现，当前 191 行，上限 300；
-  - `lib/index.js` —— 插件入口 + 命令处理器，当前 774 行，**上限 900**；超限时该次提交必须先拆模块再改功能。
+  - `lib/state.js` —— 状态文件形状、准入校验、RootTable（含 prune），当前 312 行，上限 420；
+  - `lib/policy.js` —— 只放 policy 合并与 resolve 包装，当前 84 行，上限 160；
+  - `lib/guard.js` —— 只放状态目录守卫，当前 50 行，上限 120；
+  - `lib/commands.js` —— `/roots` 参数解析、渲染与注册，当前 333 行，上限 430；
+  - `lib/index.js` —— 插件入口与装配，当前 131 行，上限 260；任一文件超上限，该次提交必须先拆模块再改功能。
   - 判据：`wc -l lib/*.js`；任一文件超上限的提交必须同时出现新文件。
 - 测试文件名按被测面命名（`store`/`discover`/`command`/`enforce`），一个文件一个面，不按功能点碎切。
   - why：失败时能一眼判断哪条约束被破坏，而不是在一堆碎片文件里找入口。
@@ -42,8 +46,9 @@
 - 只暴露一个入口：`package.json` 的 `exports["."]` 指向 `./lib/index.js`；新增对外 API 要有 README 说明与测试。
 - 不得改 `workspaceRoot`、不得重实现宿主工具、不得改宿主工具签名。
   - 判据：`grep -n 'workspaceRoot\s*=' lib/*.js` 无输出（只允许读）。
-- 依赖方向单向：`canonical.js` ← `discover.js` ← `index.js`；反向 import 出现即视为设计错误。
-  - why：反向依赖会把发现逻辑缠进入口，`discover.js` 就无法脱离宿主单测。
+- 依赖方向单向：`canonical.js` 是叶子；`discover.js` / `state.js` / `guard.js` 只依赖 `canonical.js`；`policy.js` 不 import 任何模块；`commands.js` 依赖 `canonical.js` + `discover.js` + `state.js`；只有 `index.js` 依赖以上全部。反向 import 即设计错误。
+  - why：反向依赖会把发现/命令逻辑缠进入口，各模块就无法脱离宿主与彼此单测。
+  - 判据：`grep -rn "from './index.js'" lib/` 无输出；`grep -rln "from './commands.js'\|from './policy.js'\|from './guard.js'" lib/` 只输出 `lib/index.js`；`grep -rln "from './state.js'" lib/` 只输出 `lib/commands.js` 与 `lib/index.js`。
 - 与「换根」类插件（如 `dsh-multi-folder`）互斥，禁止同时启用：两边都改 policy，行为会打架。
 
 ## 5 代码风格与命名
@@ -57,7 +62,7 @@
 
 ## 6 测试与质量门禁
 
-- 合并前提：`node --test test/` exit 0，26 项全绿（`pass 26 / fail 0`）。
+- 合并前提：`node --test test/` exit 0，30 项全绿（`pass 30 / fail 0`）。
 - 执行层不许 mock：`test/enforce.test.mjs` 必须 import 真实 `LocalSandboxProvider` 并 spawn 受限进程，覆盖五格矩阵（无副根拒绝 / 有副根放行 / 一条命令双写 / `read-only` 全拒 / 跨工作区不继承）。
 - 每个新行为必须带负向用例：只证明「放行」不算测过，必须同时证明「未授权时被拒」。
 - 改 policy 合并逻辑，必须同时改 `test/store.test.mjs`（隔离、复验、失效条目丢弃）与 README 验证表。
