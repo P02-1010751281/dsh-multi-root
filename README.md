@@ -83,12 +83,12 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 **发现不等于授权**：编号列表只是候选，`/roots adopt 3 7` 才落盘，`--all` 要显式写。每个被采纳的候选都走与手输路径**完全相同**的准入校验，并且落一条 `audit.jsonl`（动作、工作区、来源、会话 id）。
 
-在真实工作区上的样子（app-a，30 个候选）：
+在真实工作区上的样子（30 个候选）：
 
 ```
- 1. ✅ ~/.codex/worktrees/0483/app-a   [worktree] 同一仓库的另一个 worktree
+ 1. ✅ ~/.codex/worktrees/0483/app-a                [worktree] 同一仓库的另一个 worktree
  …
-16. ✅ /srv/work/apps/Projects/app-b     [sibling] 与工作区并列的 git 仓库
+16. ✅ /srv/work/apps/app-b                         [sibling] 与工作区并列的 git 仓库
 ```
 
 兄弟扫描会把 `app-b-item1…10` 这类克隆一起列出来——所以默认**不做 adopt-all**，只按编号挑。
@@ -136,8 +136,8 @@ node --test test/          # 26 项：状态/准入/守卫/发现/采纳/命令�
 {
   "version": 1,
   "workspaces": {
-    "/srv/work [
-      "/srv/work
+    "/srv/work/apps/app-a": [
+      "/srv/work/apps/app-b"
     ]
   }
 }
