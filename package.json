@@ -1,6 +1,6 @@
 {
   "name": "dsh-multi-root",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DeepSeek Harness plugin: per-workspace secondary writable roots. Adds extra directories to the sandbox policy's additionalWritableRoots for the sessions of one workspace, so workspace-write can write there without re-rooting the session or re-implementing any tool.",
   "keywords": [
     "dsh-plugin",
