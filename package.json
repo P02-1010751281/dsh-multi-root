@@ -1,7 +1,7 @@
 {
   "name": "dsh-multi-root",
-  "version": "0.4.0",
-  "description": "DeepSeek Harness plugin: per-project secondary writable roots. Adds extra directories to the sandbox policy's additionalWritableRoots for the sessions of one repository (grants are anchored at the git root, so any session inside the repo inherits them), without re-rooting the session or re-implementing any tool. The settings card, the project-row context-menu entry and the authenticated /api/multi-root/roots route are optional: a headless host runs the policy half alone.",
+  "version": "0.5.0",
+  "description": "DeepSeek Harness plugin: per-project secondary writable roots. Adds extra directories to the sandbox policy's additionalWritableRoots for the sessions of one repository (grants are anchored at the git root, so any session inside the repo inherits them), without re-rooting the session or re-implementing any tool. It also submits protectedPaths (the repository-internal .git/.agents/.codex/.aws trees), which stay read-only inside a granted root when the host payload carries the matching contract. The settings card, the project-row context-menu entry and the authenticated /api/multi-root/roots route are optional: a headless host runs the policy half alone.",
   "keywords": [
     "dsh-plugin",
     "dsh",
