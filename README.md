@@ -1,8 +1,8 @@
 # dsh-multi-root
 
-给 DeepSeek Harness 的一个工作区（会话 cwd）挂**多个可写根**：主工作区之外的目录在 `workspace-write` 下同样可写，而会话 cwd、侧栏归属、git 语义都不变。
+给 DeepSeek Harness 的一个**项目**挂多个可写根：主工作区之外的目录在 `workspace-write` 下同样可写，而会话 cwd、侧栏归属、git 语义都不变。授权按**仓库根**记账，所以仓库里任意深度的会话都继承同一份配置。
 
-宿主本来就有这个能力：`SandboxPolicyService.resolve()` 返回的 `additionalWritableRoots` 是一等字段，所有执行层（fs 围栏、bwrap/Landlock/Seatbelt、Windows ACL、`apply_patch`、PTC 子进程）都从同一个 policy 派生允许列表。缺的只是**按工作区配置**这一层，本插件只补这一层。
+宿主本来就有这个能力：`SandboxPolicyService.resolve()` 返回的 `additionalWritableRoots` 是一等字段，所有执行层（fs 围栏、bwrap/Landlock/Seatbelt、Windows ACL、`apply_patch`、PTC 子进程）都从同一个 policy 派生允许列表。缺的只是**按项目配置**这一层，本插件只补这一层。
 
 > **宿主版本要求：dsh `0.2.2-rc.1` 及以上。** `additionalWritableRoots` 是 0.2.2-rc.1 才进 policy 契约的字段；0.2.1-rc.5 整棵代码树没有这个字段，插件能加载、`/roots` 命令能用，但执行层不会消费它——表现为「装了、配置了、还是写不进去」。这个差异在挂载时**无法从服务形状分辨**（旧宿主的 `mode`/`workspaceRoot` 形状完全兼容），所以它是硬性版本要求，不是可降级项。2026-11-06 在 0.2.1-rc.5 桌面上实测踩过：`additionalWritableRoots` 在 0.2.1-rc.5 全仓 0 命中、在 0.2.2-rc.1 有 55 个文件命中。
 
@@ -60,7 +60,7 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 ## 使用
 
-在目标工作区的任意会话里：
+在目标项目的任意会话里（仓库里任意深度都行，授权记在仓库根）：
 
 ```
 /roots list                        # 列出当前工作区的副根 + 校验状态
@@ -125,8 +125,10 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 ## 验证
 
 ```bash
-node --test test/          # 30 项：状态/准入/守卫/发现/采纳/清理/命令处理器 测试 + 真实 bwrap 收敛矩阵
+node --test test/          # 39 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定 测试 + 真实 bwrap 收敛矩阵
 ```
+
+`test/project.test.mjs` 覆盖 0.2.0 的键变更：仓库根继承、兄弟仓库不继承、非仓库祖先不向下泄漏、`.git` 是文件（worktree）也算根、旧「精确 cwd」键被迁移且不留两份、运行期复验用会话 cwd 而不是落盘键。
 
 `test/enforce.test.mjs` 不用模拟：它从已安装的 dsh 载荷里 import `LocalSandboxProvider` 与 `writableRoots`，用本插件产出的 policy 真正 spawn 受限进程，验证
 
@@ -167,4 +169,10 @@ node --test test/          # 30 项：状态/准入/守卫/发现/采纳/清理/
 }
 ```
 
-键是会话 cwd 的**物理路径**。每次 `/roots` 变更都会追加一行 `audit.jsonl`（时间、动作、工作区、受影响根、会话 id）。
+键是**仓库根**的物理路径（向上找最近含 `.git` 的目录；不在仓库里时就是会话 cwd 本身）。
+
+继承只沿这一条走：`/repo/sub` 的会话读 `/repo` 的授权；`/repo` 的会话**不**读 `/repo/sub` 的；兄弟仓库互不可见；记在 `/home/user` 这种非仓库祖先上的授权**不会**向下泄漏。这套规则的每条都有对应的失败用例（`test/project.test.mjs`）。
+
+写入时按仓库根落盘：在子目录里执行 `/roots add`，条目记在仓库根，旧的「精确 cwd」条目会被迁走，不会留下两份。
+
+每次 `/roots` 变更都会追加一行 `audit.jsonl`（时间、动作、工作区、落盘键、受影响根、会话 id）。
