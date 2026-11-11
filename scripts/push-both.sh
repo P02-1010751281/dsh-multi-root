@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把同一个分支同时推到 origin 的每条 push URL（Forgejo + GitHub），每条腿独立重试。
 #
-#   bash scripts/push-both.sh              # 推 master
+#   bash scripts/push-both.sh              # 推 master，连同本地 tag
 #   bash scripts/push-both.sh <branch>
 #   TRIES=8 SLEEP=5 bash scripts/push-both.sh
 #
@@ -31,6 +31,44 @@ LOCAL="$(git rev-parse "$BRANCH" 2>/dev/null)" || { echo "错误：本地没有�
 SHORT="${LOCAL:0:7}"
 echo "分支 $BRANCH → $SHORT，目标 ${#URLS[@]} 个（每条最多 $TRIES 次）"
 
+# 本地 tag 是版本锚点：安装 spec 可以钉到 tag（`…git#v0.1.3`），所以 tag 必须和分支
+# 一起到远端，否则远端只有分支头、没有可复现的锚。只推远端缺失或指向不同对象的那些。
+push_tags() {
+  local url="$1" label="$2"
+  local tags=()
+  mapfile -t tags < <(git tag -l)
+  if [ "${#tags[@]}" -eq 0 ]; then
+    echo "  · $label  没有本地 tag"
+    return 0
+  fi
+  local tag local_sha remote_sha attempt out ok
+  for tag in "${tags[@]}"; do
+    local_sha="$(git rev-parse "refs/tags/$tag")"
+    remote_sha="$(git ls-remote "$url" "refs/tags/$tag" 2>/dev/null | cut -f1)"
+    if [ "$remote_sha" = "$local_sha" ]; then
+      echo "  ✓ $label  tag $tag 已是最新"
+      continue
+    fi
+    ok=0
+    for attempt in $(seq 1 "$TRIES"); do
+      out="$(git push "$url" "refs/tags/$tag" 2>&1)"
+      remote_sha="$(git ls-remote "$url" "refs/tags/$tag" 2>/dev/null | cut -f1)"
+      if [ "$remote_sha" = "$local_sha" ]; then
+        echo "  ✓ $label  tag $tag 已更新（第 $attempt 次）"
+        ok=1
+        break
+      fi
+      echo "  … $label  tag $tag 第 $attempt 次未同步：$(printf '%s' "$out" | tail -1)"
+      [ "$attempt" -lt "$TRIES" ] && sleep "$SLEEP"
+    done
+    if [ "$ok" -eq 0 ]; then
+      echo "  ✗ $label  tag $tag 重试用尽" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 failed=0
 for url in "${URLS[@]}"; do
   label="$(printf '%s' "$url" | sed -E 's#^[a-z+]*://([^@/]*@)?##; s#/$##')"
@@ -53,6 +91,7 @@ for url in "${URLS[@]}"; do
     echo "  ✗ $label  重试用尽，远端仍不是 $SHORT" >&2
     failed=$((failed + 1))
   fi
+  push_tags "$url" "$label" || failed=$((failed + 1))
 done
 
 if [ "$failed" -gt 0 ]; then
