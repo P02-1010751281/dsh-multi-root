@@ -93,14 +93,16 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 | 环节 | 实现 |
 |---|---|
 | 浏览器半 | `lib/client.js`，手写的 lazy-CJS 经典脚本（`window.__ModuleLoader__.load({ id, factory })`），**无构建步骤**，只 `require` 宿主平台模块表里的 `react` |
-| 挂载点 | `settings.section`（宿主声明的 root-scope list slot），`id: multi-root` |
+| 挂载点 | `settings.section`（宿主声明的 root-scope list slot），`id: multi-root`；导航图标走 `settings.section.icon`，`id` 必须与卡片相同 |
 | 数据路由 | `api/multi-root/roots`（文档相对路径），宿主半注册在 `ctx.connection.fetch`——**只对 owner peer 放行，其它主体 403** |
 | 写入校验 | 与 `/roots add` 同一条 `validateGrant`：拒绝相对路径、符号链接别名、home、当前工作区本身、包含关系 |
 | 审计 | 带 `surface: "settings"`，与斜杠命令的改动**可区分** |
 
 没有 `connection` 服务的宿主（headless）不会注册这个路由，卡片也就不出现，但**策略照常生效**——UI 是可选的一层，不是功能本身。
 
-`test/client.test.mjs` 守住浏览器半的契约：不许出现 `import`/`export`（经典脚本会静默不解析），`require` 只许是平台模块表里的名字。
+`test/client.test.mjs` 守住浏览器半的契约：不许出现 `import`/`export`（经典脚本会静默不解析），`require` 只许是平台模块表里的名字，**解构到的每个 primitives 符号都必须在宿主载荷的导出表里真实存在**（图标插槽这类契约一旦拼错，界面会静默少一块，而不是报错）。
+
+视觉上不另造一套：导航图标用宿主自己的 `PermissionIconWorkspaceWrite*`（选中/未选中两档），根条目用 `StateDot` + `PathLabel` + `Button` 渲染，状态由图标与色点承载，不再用 `✓`/`✗` 字符顶替图标——那样既缺图标，也把无障碍名称挤成了字符。
 
 ## 项目右键菜单（同一份配置）
 
@@ -108,7 +110,7 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 | 菜单项 | 行为 |
 |---|---|
-| `✓ /path` / `✗ /path（原因）` | 只读展示现有副根与当前判定 |
+| `/path`（行首图标表示可用/不可用，不可用时附原因） | 只读展示现有副根与当前判定 |
 | `添加 /path（sibling｜worktree｜code-workspace）` | 候选来自 `/roots discover` 的那三个来源，行内直接落盘 |
 | `移除 /path` | 删除该条授权 |
 
@@ -186,7 +188,7 @@ bash scripts/patch-host.sh --revert   # 从备份还原
 ## 验证
 
 ```bash
-node --test test/          # 66 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含右键菜单形状与失败提示）/只读硬化（8 项）+ 真实 bwrap 收敛矩阵
+node --test test/          # 67 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含图标插槽、primitives 符号对照、右键菜单形状与失败提示）/只读硬化（8 项）+ 真实 bwrap 收敛矩阵
 ```
 
 未打宿主补丁时，`test/hardening.test.mjs` 的 3 项执行层用例**跳过**（不是通过）：那是一份能力报告，不是保证。打了补丁后同一套测试 8/8 全过——这正是判据「跳过会翻成通过」：

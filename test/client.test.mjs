@@ -5,8 +5,21 @@
  * nothing at runtime. Both are asserted here against the bytes we ship.
  */
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import test from 'node:test'
+
+/** The installed payload, when there is one — the field the shell actually ships. */
+function findHostRepo() {
+  if (process.env.DSH_REPO !== undefined && process.env.DSH_REPO !== '') return process.env.DSH_REPO
+  const root = join(process.env.HOME ?? '/root', '.local', 'share', 'dsh-desktop')
+  const versions = existsSync(root)
+    ? readdirSync(root).filter(name => existsSync(join(root, name, 'repo', 'packages', 'client', 'ui-primitives', 'lib', 'index.js')))
+    : []
+  if (versions.length === 0) return undefined
+  versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  return join(root, versions[versions.length - 1], 'repo')
+}
 
 const SOURCE = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
@@ -19,6 +32,23 @@ const PLATFORM_MODULES = new Set([
   '@deepseek-ai/dsh-client-ui-primitives',
   '@deepseek-ai/dsh-client-ui-dockkit',
 ])
+
+/** Stand-ins for the shell primitives the bundle renders; only identity matters here. */
+const PRIMITIVES = Object.fromEntries([
+  'Button', 'PathLabel', 'StateDot',
+  'IconFolderOpenOutlineRegular', 'IconPlusOutlineRegular', 'IconRefreshOutlineRegular',
+  'IconTrashOutlineRegular', 'IconWarningOutlineRegular',
+  'PermissionIconReadOnlyRegular', 'PermissionIconWorkspaceWriteMedium', 'PermissionIconWorkspaceWriteRegular',
+].map(name => [name, () => null]))
+
+/** The frozen platform table as the sandbox sees it, with the two modules asserted above. */
+function platformModules(React) {
+  return name => (name === 'react'
+    ? React
+    : name === '@deepseek-ai/dsh-client-ui-primitives'
+      ? PRIMITIVES
+      : name === 'react/jsx-runtime' ? {} : undefined)
+}
 
 test('the bundle registers itself through the module loader, not as an ES module', () => {
   assert.match(SOURCE, /window\.__ModuleLoader__\.load\(\{/u)
@@ -45,8 +75,41 @@ test('the card is registered in the settings slot it declares', () => {
 test('the project-row menu is one contribution for workspace targets, not a slot', () => {
   assert.match(SOURCE, /ctx\.contextMenus\.register\(\{/u)
   assert.match(SOURCE, /target: 'workspace'/u)
-  assert.equal([...SOURCE.matchAll(/ctx\.slots\.inject\('/gu)].length, 1, '仍然只有一个 slot 注册')
+  const sectionSlots = [...SOURCE.matchAll(/ctx\.slots\.inject\('settings\.section'/gu)]
+  assert.equal(sectionSlots.length, 1, '设置卡片仍然只注册一次')
+  // The nav glyph is a separate slot keyed by the section id: without it the
+  // shell paints its default glyph, which is what "缺少图标" looked like.
+  assert.match(SOURCE, /ctx\.slots\.inject\('settings\.section\.icon'/u)
+  assert.match(SOURCE, /name: 'settings\.section\.icon',\s*\n\s*id: 'multi-root'/u)
+  // Menu glyphs are addressed by action id, so every action needs a key here.
+  assert.match(SOURCE, /ctx\.slots\.inject\('contextMenu\.icon'/u)
+  for (const key of ['multi-root.menu', 'multi-root.root', 'multi-root.none', 'multi-root.add', 'multi-root.remove', 'multi-root.unreachable']) {
+    assert.ok(SOURCE.includes(`'${key}'`), `菜单图标键缺失：${key}`)
+  }
 })
+
+/** Every primitive this bundle destructures, read straight from the bytes. */
+function primitivesUsed() {
+  const block = SOURCE.match(/const \{([\s\S]*?)\} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/u)
+  assert.ok(block !== null, '必须从 primitives 里解构组件')
+  return block[1].split(',').map(name => name.trim()).filter(name => name !== '')
+}
+
+test('every primitives symbol the bundle destructures is exported by the shell', () => {
+  const repo = findHostRepo()
+  if (repo === undefined) return // 没有载荷就没有可对照的导出表
+  const bundle = readFileSync(`${repo}/packages/client/ui-primitives/lib/index.js`, 'utf8')
+  const exported = new Set(
+    [...bundle.matchAll(/export \{([\s\S]*?)\};/gu)]
+      .flatMap(match => match[1].split(','))
+      .map(name => name.trim().split(/\s+as\s+/u).pop()),
+  )
+  assert.ok(exported.size > 0, '载荷的导出表必须解析出来')
+  for (const name of primitivesUsed()) {
+    assert.ok(exported.has(name), `primitives 里没有导出 ${name}`)
+  }
+})
+
 
 test('the bundle loads in a classic-script sandbox and registers the card', async () => {
   const vm = await import('node:vm')
@@ -67,7 +130,7 @@ test('the bundle loads in a classic-script sandbox and registers the card', asyn
     useEffect: () => {},
     useCallback: fn => fn,
   }
-  const plugin = captured.factory(name => (name === 'react' ? React : undefined))
+  const plugin = captured.factory(platformModules(React))
   // 跨 realm 数组的原型不同，deepEqual 会误报；按内容比较。
   assert.equal(Array.from(plugin.inject).join(','), 'slots,contextMenus')
   assert.equal(typeof plugin.apply, 'function')
@@ -85,11 +148,24 @@ test('the bundle loads in a classic-script sandbox and registers the card', asyn
       notify: (text, success) => notices.push({ text, success }),
     },
   })
-  assert.equal(registered.length, 1)
-  assert.equal(registered[0].options.name, 'settings.section')
-  assert.equal(registered[0].options.id, 'multi-root')
-  assert.equal(typeof registered[0].options.label(), 'string')
-  assert.equal(typeof registered[0].component, 'function')
+  const bySlot = name => registered.filter(entry => entry.options.name === name)
+  assert.equal(bySlot('settings.section').length, 1, '卡片只注册一次')
+  assert.equal(bySlot('settings.section').at(0).options.id, 'multi-root')
+  assert.equal(typeof bySlot('settings.section').at(0).options.label(), 'string')
+  assert.equal(typeof bySlot('settings.section').at(0).component, 'function')
+
+  const icons = bySlot('settings.section.icon')
+  assert.equal(icons.length, 1, '设置导航图标必须注册')
+  assert.equal(icons[0].options.id, 'multi-root', '图标 id 必须等于 section id，否则壳不渲染')
+  assert.equal(typeof icons[0].component, 'function')
+
+  const menuIcons = bySlot('contextMenu.icon')
+  assert.equal(menuIcons.length, 6, '每个菜单动作一个键')
+  assert.deepEqual(
+    Array.from(menuIcons.map(entry => entry.options.key)).sort(),
+    ['multi-root.add', 'multi-root.menu', 'multi-root.none', 'multi-root.remove', 'multi-root.root', 'multi-root.unreachable'],
+  )
+  for (const entry of menuIcons) assert.equal(typeof entry.component, 'function')
 
   assert.equal(menus.length, 1)
   assert.equal(menus[0].id, 'multi-root.workspace')
@@ -119,7 +195,7 @@ test('the menu resolves to in-place add/remove actions over the one route', asyn
     useEffect: () => {},
     useCallback: fn => fn,
   }
-  const plugin = captured.factory(name => (name === 'react' ? React : undefined))
+  const plugin = captured.factory(platformModules(React))
   let menu
   plugin.apply({
     slots: { inject: () => {}, register: () => {} },
@@ -136,8 +212,15 @@ test('the menu resolves to in-place add/remove actions over the one route', asyn
   const actions = await menu.resolve({ workspaceId: 'w1', path: '/repo', displayTitle: 'repo' })
   assert.equal(actions.length, 1)
   assert.equal(actions[0].label, '多可写根')
+  // 跨 realm 的对象原型不同，deepEqual 会误报：按序列化结果比较。
+  assert.equal(JSON.stringify(actions[0].icon), JSON.stringify({ key: 'multi-root.menu' }), '顶层菜单项带图标')
   const labels = Array.from(actions[0].children).map(child => child.label)
-  assert.deepEqual(labels, ['✓ /extra', '添加 /sib（sibling）', '移除 /extra'])
+  // 状态由行首图标承载，标签里不再塞 ✓/✗ 字符。
+  assert.deepEqual(labels, ['/extra', '添加 /sib（sibling）', '移除 /extra'])
+  assert.deepEqual(
+    Array.from(actions[0].children).map(child => child.icon?.key),
+    ['multi-root.root', 'multi-root.add', 'multi-root.remove'],
+  )
   assert.equal(requests.length, 1)
   assert.equal(requests[0].route, 'api/multi-root/roots')
   assert.deepEqual(JSON.parse(requests[0].init.body), { action: 'discover', anchor: '/repo' })
@@ -161,7 +244,7 @@ test('the menu says so when the route refuses, instead of failing silently', asy
   }
   vm.runInNewContext(SOURCE, sandbox)
   const React = { createElement: () => null, useState: v => [v, () => {}], useEffect: () => {}, useCallback: fn => fn }
-  const plugin = captured.factory(name => (name === 'react' ? React : undefined))
+  const plugin = captured.factory(platformModules(React))
   let menu
   plugin.apply({
     slots: { inject: () => {}, register: () => {} },
