@@ -43,10 +43,12 @@ DSH_HOME=~/.dsh dsh plugin --profile web add /path/to/dsh-multi-root
 | **仓库快照** | `"dsh-multi-root": "git+ssh://forgejo@<instance>/<owner>/dsh-multi-root.git"` | 日常使用：插件装在 profile 内，**不依赖源码目录或数据盘是否挂载** |
 | **本地链接** | `"dsh-multi-root": "link:/path/to/dsh-multi-root"`（`scripts/install-desktop.sh` 走这条） | 开发：改完代码重启宿主即可生效 |
 
+> **钉版本**：裸 `git+…` 规格在**安装那一刻**解析到分支头，同一行 spec 今天和明天装到的可能不是同一份代码。把 tag 接在后面才是不可变锚：`"dsh-multi-root": "git+ssh://forgejo@<instance>/<owner>/dsh-multi-root.git#v0.1.3"`。仓库每次发版打 annotated tag，`scripts/push-both.sh` 会连同分支一起把 tag 推到每条 push URL（否则远端只有分支头、没有可复现的锚）。
+
 仓库快照模式下，改完代码要重新装一次再重启宿主：
 
 ```bash
-git -C /path/to/dsh-multi-root push
+bash /path/to/dsh-multi-root/scripts/push-both.sh   # 分支 + tag，双远端逐条校验
 cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 ```
 
