@@ -68,7 +68,7 @@
 
 ## 6 测试与质量门禁
 
-- 合并前提：`node --test test/` exit 0，51 项全绿（`pass 51 / fail 0`）。
+- 合并前提：`node --test test/` exit 0，52 项全绿（`pass 52 / fail 0`）。
 - 执行层不许 mock：`test/enforce.test.mjs` 必须 import 真实 `LocalSandboxProvider` 并 spawn 受限进程，覆盖五格矩阵（无副根拒绝 / 有副根放行 / 一条命令双写 / `read-only` 全拒 / 跨工作区不继承）。
 - 每个新行为必须带负向用例：只证明「放行」不算测过，必须同时证明「未授权时被拒」。
 - 改 policy 合并逻辑，必须同时改 `test/store.test.mjs`（隔离、复验、失效条目丢弃）与 README 验证表。

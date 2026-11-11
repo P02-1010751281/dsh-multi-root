@@ -143,7 +143,7 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 ## 验证
 
 ```bash
-node --test test/          # 51 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由/浏览器半契约 + 真实 bwrap 收敛矩阵
+node --test test/          # 52 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由/浏览器半契约 + 真实 bwrap 收敛矩阵
 ```
 
 `test/project.test.mjs` 覆盖 0.2.0 的键变更：仓库根继承、兄弟仓库不继承、非仓库祖先不向下泄漏、`.git` 是文件（worktree）也算根、旧「精确 cwd」键被迁移且不留两份、运行期复验用会话 cwd 而不是落盘键。
