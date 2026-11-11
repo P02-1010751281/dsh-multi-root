@@ -99,6 +99,6 @@
 - 禁止提交 `node_modules/`、`*.pre-*`、`*.bak`、本机绝对路径。
 - 禁止绕过门禁（`git commit --no-verify`、`node --test --test-skip-pattern` 全跳过等）；紧急豁免必须在 commit message 写明原因与回滚点。
 - 禁止在未上真桌面实测的情况下宣称某个 dsh 版本兼容；版本契约变化先验收再改文档。
-- UI 只允许两个形态，且共用同一个 `/api/multi-root/roots`：设置页里的「多可写根」卡片，和项目行右键菜单里的**一个**「多可写根」子项。禁止加换根、`@` 文件菜单、侧栏面板、工具栏按钮、自绘对话框或第二个数据路由。
+- UI 只允许两个形态，且共用同一个 `/api/multi-root/roots`：设置页里的「多可写根」卡片，和项目行右键菜单里的**一个**「多可写根」子项。禁止加换根、`@` 文件菜单、侧栏面板、工具栏按钮、自绘对话框或第二个数据路由。图标只允许挂在这两个形态自己的键上：`settings.section.icon`（id 必须等于 section id）与 `contextMenu.icon`（只给本贡献的 action 用 `icon: { key }`）。
   - why：右键菜单是唯一既能拿到项目路径、又不新增组件的入口。宿主**没有**给插件「打开设置页」的公开 API（`settings.launcher`、`settings.trigger` 都是 `single` slot，已被宿主自己的实现占满），所以「跳转设置页并预填」做不到；在菜单里直接列出现有根与可发现的候选、就地增删，是等价且不新增 surface 的做法。
-  - 判据：`grep -c "slots.inject('" lib/client.js` 为 1 且只出现 `settings.section`；`grep -c "contextMenus.register(" lib/client.js` 为 1 且该贡献里 `target: 'workspace'`；`grep -c "connection.fetch.register" lib/index.js` 仍为 1。
+  - 判据：`grep -o "ctx\.slots\.inject('[^']*'" lib/client.js | sort -u` 只有 `settings.section`、`settings.section.icon`、`contextMenu.icon` 三种，且 `settings.section.icon` 的 `id` 与卡片同为 `multi-root`；`grep -c "contextMenus.register(" lib/client.js` 为 1 且该贡献里 `target: 'workspace'`；`grep -c "connection.fetch.register" lib/index.js` 仍为 1。
