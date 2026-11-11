@@ -5,7 +5,7 @@
  * a bypass introduced in the route shows up here.
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -125,4 +125,47 @@ test('GET surfaces a stored grant that no longer validates', async () => {
   const body = await (await get(fetch)).json()
   assert.equal(body.anchors[0].roots[0].ok, false)
   assert.equal(typeof body.anchors[0].roots[0].error, 'string')
+})
+
+test('POST discover proposes the candidates the command prints, and writes nothing', async () => {
+  const { base, fetch, repo, table } = fixture()
+  const other = join(base, 'other')
+  mkdirSync(join(other, '.git'), { recursive: true })
+  const response = await post(fetch, { action: 'discover', anchor: repo })
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  const candidate = body.candidates.find(item => item.path === canonicalPath(other))
+  assert.ok(candidate !== undefined, '应发现并列仓库')
+  assert.equal(candidate.source, 'sibling')
+  assert.equal(candidate.ok, true)
+  assert.equal(candidate.granted, false)
+  assert.deepEqual(table.workspaces(), [], '发现不落盘')
+  assert.equal(existsSync(table.auditPath), false, '发现不写审计')
+})
+
+test('POST discover marks an already granted candidate and answers unconfigured projects', async () => {
+  const { base, fetch, repo } = fixture()
+  const other = join(base, 'other')
+  mkdirSync(join(other, '.git'), { recursive: true })
+  await post(fetch, { action: 'add', anchor: repo, path: canonicalPath(other) })
+  const granted = (await (await post(fetch, { action: 'discover', anchor: repo })).json())
+    .candidates.find(item => item.path === canonicalPath(other))
+  assert.equal(granted.granted, true, '已授权的候选仍要出现，并标记为已授权')
+
+  const lonely = join(base, 'lonely')
+  mkdirSync(lonely, { recursive: true })
+  const fresh = await post(fetch, { action: 'discover', anchor: lonely })
+  assert.equal(fresh.status, 200, '未配置的项目也要能看候选，而不是 404')
+  const body = await fresh.json()
+  assert.ok(Array.isArray(body.candidates))
+  assert.deepEqual(body.anchors, [{ key: repo, roots: [{ path: canonicalPath(other), ok: true }] }])
+})
+
+test('POST add from a sub-directory lands on the repository root key', async () => {
+  const { fetch, repo, shared, table } = fixture()
+  const response = await post(fetch, { action: 'add', anchor: join(repo, 'deep', 'sub'), path: shared })
+  assert.equal(response.status, 200)
+  assert.deepEqual(Object.keys(table.state.workspaces), [repo], '键必须是仓库根，不是子目录')
+  const body = await response.json()
+  assert.deepEqual(body.anchors, [{ key: repo, roots: [{ path: shared, ok: true }] }])
 })

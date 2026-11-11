@@ -101,6 +101,22 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 `test/client.test.mjs` 守住浏览器半的契约：不许出现 `import`/`export`（经典脚本会静默不解析），`require` 只许是平台模块表里的名字。
 
+## 项目右键菜单（同一份配置）
+
+右键侧栏里的**项目** → **多可写根**，就地看和改这个项目的副根：
+
+| 菜单项 | 行为 |
+|---|---|
+| `✓ /path` / `✗ /path（原因）` | 只读展示现有副根与当前判定 |
+| `添加 /path（sibling｜worktree｜code-workspace）` | 候选来自 `/roots discover` 的那三个来源，行内直接落盘 |
+| `移除 /path` | 删除该条授权 |
+
+每次打开菜单都会向 `api/multi-root/roots` 发一次 `{action: "discover"}`：**只读**，不写盘、不写审计，返回当前快照 + 候选，每个候选都带 `validateGrant` 的判定。点「添加」与手输路径走**同一条**准入校验，落盘键仍是仓库根，审计同样记 `surface: "settings"`。失败不静默——菜单用宿主 toast 报出拒绝原因。
+
+为什么不是「跳转到设置页并预填」：宿主没有向插件暴露打开设置面板的 API（`settings.launcher`、`settings.trigger` 都是 `single` slot，已被宿主自己的实现占满），所以改成在菜单里直接完成增删——同样的结果，不新增组件、不新增路由。
+
+顺带修掉一个旧缺陷：路由现在先把 anchor 归一化到**仓库根**（与 `/roots add` 一致），所以从仓库子目录右键/填表不会再留下一条永远命不中的键。
+
 ## 自动发现（C2）
 
 `/roots discover` 只读扫描三个来源，按可信度排序并**编号**：
@@ -136,14 +152,14 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 ## 边界（明说）
 
 - **guard 是拦路，不是墙**：配置目录在 `$DSH_HOME` 下，正常项目会话够不到；若某个会话的 cwd 覆盖了 `$DSH_HOME`，插件会拒绝对该目录的 `write`/`edit`/`apply_patch` 与含该路径字面量的 `bash`/`pwsh`，但**运行时拼接路径绕过字符串扫描是检测不到的**。
-- UI 只有一个设置页卡片（见上）：无 `@` 文件菜单、无侧栏面板、无工具栏按钮；侧栏仍按 cwd 归属一个工作区，`glob`/`grep` 用绝对路径本来就能到副根。
+- UI 只有两处（见上）：设置页卡片 + 项目右键菜单里的一个子项，共用一条路由；无 `@` 文件菜单、无侧栏面板、无工具栏按钮、无自绘对话框。侧栏仍按 cwd 归属一个工作区，`glob`/`grep` 用绝对路径本来就能到副根。
 - 与 `dsh-multi-folder` 这类「换根」插件**不能共存**：两边都改 policy，行为会打架。
 - 部署级 `additionalWritableRoots`（profile patch 里的 `sandbox-policy.config`）仍然生效，本插件是在其结果上**追加**并去重。
 
 ## 验证
 
 ```bash
-node --test test/          # 52 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由/浏览器半契约 + 真实 bwrap 收敛矩阵
+node --test test/          # 58 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含右键菜单形状与失败提示）+ 真实 bwrap 收敛矩阵
 ```
 
 `test/project.test.mjs` 覆盖 0.2.0 的键变更：仓库根继承、兄弟仓库不继承、非仓库祖先不向下泄漏、`.git` 是文件（worktree）也算根、旧「精确 cwd」键被迁移且不留两份、运行期复验用会话 cwd 而不是落盘键。

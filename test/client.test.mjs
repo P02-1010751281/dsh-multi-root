@@ -39,7 +39,13 @@ test('every require() names a module the shell actually shares', () => {
 test('the card is registered in the settings slot it declares', () => {
   assert.match(SOURCE, /ctx\.slots\.inject\('settings\.section'/u)
   assert.match(SOURCE, /name: 'settings\.section'/u)
-  assert.match(SOURCE, /inject: \['slots'\]/u)
+  assert.match(SOURCE, /inject: \['slots', 'contextMenus'\]/u)
+})
+
+test('the project-row menu is one contribution for workspace targets, not a slot', () => {
+  assert.match(SOURCE, /ctx\.contextMenus\.register\(\{/u)
+  assert.match(SOURCE, /target: 'workspace'/u)
+  assert.equal([...SOURCE.matchAll(/ctx\.slots\.inject\('/gu)].length, 1, '仍然只有一个 slot 注册')
 })
 
 test('the bundle loads in a classic-script sandbox and registers the card', async () => {
@@ -63,14 +69,20 @@ test('the bundle loads in a classic-script sandbox and registers the card', asyn
   }
   const plugin = captured.factory(name => (name === 'react' ? React : undefined))
   // 跨 realm 数组的原型不同，deepEqual 会误报；按内容比较。
-  assert.equal(Array.from(plugin.inject).join(','), 'slots')
+  assert.equal(Array.from(plugin.inject).join(','), 'slots,contextMenus')
   assert.equal(typeof plugin.apply, 'function')
 
   const registered = []
+  const menus = []
+  const notices = []
   plugin.apply({
     slots: {
       inject: (name, callback) => callback(),
       register: (options, component) => registered.push({ options, component }),
+    },
+    contextMenus: {
+      register: options => { menus.push(options); return () => {} },
+      notify: (text, success) => notices.push({ text, success }),
     },
   })
   assert.equal(registered.length, 1)
@@ -78,4 +90,84 @@ test('the bundle loads in a classic-script sandbox and registers the card', asyn
   assert.equal(registered[0].options.id, 'multi-root')
   assert.equal(typeof registered[0].options.label(), 'string')
   assert.equal(typeof registered[0].component, 'function')
+
+  assert.equal(menus.length, 1)
+  assert.equal(menus[0].id, 'multi-root.workspace')
+  assert.equal(menus[0].target, 'workspace')
+  assert.equal(typeof menus[0].resolve, 'function')
+})
+
+test('the menu resolves to in-place add/remove actions over the one route', async () => {
+  const vm = await import('node:vm')
+  let captured
+  const requests = []
+  const replies = []
+  const notices = []
+  const sandbox = {
+    window: { __ModuleLoader__: { load: options => { captured = options } } },
+    console,
+    fetch: async (route, init) => {
+      requests.push({ route, init })
+      const body = replies.shift() ?? {}
+      return { ok: true, status: 200, json: async () => body }
+    },
+  }
+  vm.runInNewContext(SOURCE, sandbox)
+  const React = {
+    createElement: () => null,
+    useState: value => [value, () => {}],
+    useEffect: () => {},
+    useCallback: fn => fn,
+  }
+  const plugin = captured.factory(name => (name === 'react' ? React : undefined))
+  let menu
+  plugin.apply({
+    slots: { inject: () => {}, register: () => {} },
+    contextMenus: { register: options => { menu = options; return () => {} }, notify: (text, success) => notices.push({ text, success }) },
+  })
+
+  replies.push({
+    anchors: [{ key: '/repo', roots: [{ path: '/extra', ok: true }] }],
+    candidates: [
+      { path: '/sib', source: 'sibling', ok: true, granted: false, detail: '并列仓库' },
+      { path: '/taken', source: 'worktree', ok: true, granted: true },
+    ],
+  })
+  const actions = await menu.resolve({ workspaceId: 'w1', path: '/repo', displayTitle: 'repo' })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].label, '多可写根')
+  const labels = Array.from(actions[0].children).map(child => child.label)
+  assert.deepEqual(labels, ['✓ /extra', '添加 /sib（sibling）', '移除 /extra'])
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].route, 'api/multi-root/roots')
+  assert.deepEqual(JSON.parse(requests[0].init.body), { action: 'discover', anchor: '/repo' })
+
+  const add = actions[0].children.find(child => String(child.label).startsWith('添加'))
+  replies.push({ anchors: [], candidates: [] })
+  await add.run()
+  assert.deepEqual(JSON.parse(requests[1].init.body), { action: 'add', anchor: '/repo', path: '/sib' })
+  assert.equal(notices.at(-1).success, true)
+  assert.match(notices.at(-1).text, /已添加 \/sib/u)
+})
+
+test('the menu says so when the route refuses, instead of failing silently', async () => {
+  const vm = await import('node:vm')
+  let captured
+  const notices = []
+  const sandbox = {
+    window: { __ModuleLoader__: { load: options => { captured = options } } },
+    console,
+    fetch: async () => ({ ok: false, status: 400, json: async () => ({ error: '该目录包含当前工作区' }) }),
+  }
+  vm.runInNewContext(SOURCE, sandbox)
+  const React = { createElement: () => null, useState: v => [v, () => {}], useEffect: () => {}, useCallback: fn => fn }
+  const plugin = captured.factory(name => (name === 'react' ? React : undefined))
+  let menu
+  plugin.apply({
+    slots: { inject: () => {}, register: () => {} },
+    contextMenus: { register: options => { menu = options; return () => {} }, notify: (text, success) => notices.push({ text, success }) },
+  })
+  const actions = await menu.resolve({ workspaceId: 'w', path: '/repo', displayTitle: 'repo' })
+  assert.equal(actions[0].disabled, true)
+  assert.match(actions[0].label, /该目录包含当前工作区/u)
 })
