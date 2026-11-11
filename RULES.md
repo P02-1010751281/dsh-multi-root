@@ -66,6 +66,9 @@
 - 执行层不许 mock：`test/enforce.test.mjs` 必须 import 真实 `LocalSandboxProvider` 并 spawn 受限进程，覆盖五格矩阵（无副根拒绝 / 有副根放行 / 一条命令双写 / `read-only` 全拒 / 跨工作区不继承）。
 - 每个新行为必须带负向用例：只证明「放行」不算测过，必须同时证明「未授权时被拒」。
 - 改 policy 合并逻辑，必须同时改 `test/store.test.mjs`（隔离、复验、失效条目丢弃）与 README 验证表。
+- 发版：`package.json` 版本号、`release:` 提交、annotated tag 属同一次发布，且 tag 必须双远端可见。
+  - why：profile 的安装 spec 可以钉到 tag（`…#v0.1.3`），tag 只在本地或只在一条腿上，钉版本就不可复现。
+  - 判据：Forgejo 与 GitHub 各自 `git ls-remote refs/tags/vX.Y.Z` 返回**同一个** tag 对象；`git clone --branch vX.Y.Z` 检出的 `package.json` 版本与之相符。推 tag 由 `scripts/push-both.sh` 负责，不单靠人手。
 
 ## 7 安全、性能与日志
 
