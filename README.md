@@ -9,12 +9,13 @@
 ## 机制
 
 ```
-ctx.sandboxPolicy.resolve(request)   ← 宿主服务，返回 { mode, workspaceRoot, additionalWritableRoots }
+ctx.sandboxPolicy.resolve(request)   ← 宿主服务，返回 { mode, workspaceRoot, additionalWritableRoots, protectedPaths }
         ↑ 本插件只在实例上加一个 own property 包装它
         │
         ├─ fs 围栏        workspaceWritableRoots(policy)  → write/edit/apply_patch 放行
         ├─ bash/pwsh      workspaceWritableRoots(policy)  → bwrap 里 --bind <root> <root>
         ├─ 运行期上下文   宿主自己的 sandbox:policy 段落会打印 "Additional writable directories: [...]"
+        ├─ 只读硬化       副根内的 .git/.agents/.codex/.aws → bwrap 追加 --ro-bind，fs 围栏直接拒
         └─ read-only      以上两处都返回空数组 —— 副根不绕过模式
 ```
 
@@ -149,17 +150,50 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 运行期每条都会复验：失效条目被**丢弃并告警**，而不是让宿主的 `workspaceWritableRoots` 抛错把整个工作区的工具调用打瘫。
 
+## 只读硬化（v0.5.0）
+
+授权一个副根 = 授权**整棵目录树**，包括 `.git`（钩子是可执行内容）、`.agents` / `.codex`（agent 指令）和 `.aws`（凭据）。Codex 的沙箱把这些当只读，DSH 0.2.2-rc.1 的 policy 没有这个表达：契约里只有 `additionalWritableRoots`，三个执行层（bwrap / Landlock / Seatbelt）与 fs 围栏都从 `workspaceWritableRoots()` 派生，bwrap 直接 `--bind <root> <root>`。
+
+所以硬化分两半，缺一不可：
+
+| 半 | 内容 |
+|---|---|
+| 插件半（本仓库） | `resolve()` 里补 `protectedPaths`：每个副根 × `['.git', '.agents', '.codex', '.aws']`，只做减法，且与部署级已有条目合并去重 |
+| 宿主半（载荷补丁） | 三个消费点读这个字段：bwrap 在 `--bind` **之后**追加 `--ro-bind`（后挂载赢）；fs 围栏对落在保护路径内的 target 抛 `FS_SANDBOX_DENIED`；Landlock 无法对子路径减权，改为整根不授权（fail closed）；Seatbelt 追加 `(deny file-write* (subpath …))`；policy 服务在 `resolve()` 结果里声明 `protectedPathsSupported: true` |
+
+打补丁：
+
+```bash
+bash scripts/patch-host.sh            # 打（先备份，锚点不中即失败，不半打）
+DRY=1 bash scripts/patch-host.sh      # 只校验锚点与语法
+bash scripts/patch-host.sh --revert   # 从备份还原
+```
+
+补丁对现有行为**没有影响**：没有 `protectedPaths` 的 policy 走的还是原来那些分支，不带副根的会话逐字节一致。**载荷升级会覆盖这几个文件**，升级后要重跑；`node --test test/hardening.test.mjs` 在未打补丁的载荷上是 5 通过 3 跳过，打了之后 8/8——跳过会翻成通过，这是唯一该信的判据。
+
+**插件不假设宿主打了补丁。** 挂载时读 `probe.protectedPathsSupported`；缺失就 `logger.warn` 明说「副根内的 .git/.agents/.codex/.aws 仍可被写入」，不假装硬化生效。
+
+边界再强调一次：硬化只覆盖**副根**。主工作区在宿主默认配置里就是整棵可写（连 `.git`），本插件不改那个默认值。
+
 ## 边界（明说）
 
 - **guard 是拦路，不是墙**：配置目录在 `$DSH_HOME` 下，正常项目会话够不到；若某个会话的 cwd 覆盖了 `$DSH_HOME`，插件会拒绝对该目录的 `write`/`edit`/`apply_patch` 与含该路径字面量的 `bash`/`pwsh`，但**运行时拼接路径绕过字符串扫描是检测不到的**。
 - UI 只有两处（见上）：设置页卡片 + 项目右键菜单里的一个子项，共用一条路由；无 `@` 文件菜单、无侧栏面板、无工具栏按钮、无自绘对话框。侧栏仍按 cwd 归属一个工作区，`glob`/`grep` 用绝对路径本来就能到副根。
 - 与 `dsh-multi-folder` 这类「换根」插件**不能共存**：两边都改 policy，行为会打架。
 - 部署级 `additionalWritableRoots`（profile patch 里的 `sandbox-policy.config`）仍然生效，本插件是在其结果上**追加**并去重。
+- 只读硬化**只覆盖副根**，不覆盖主工作区：宿主本来就把整个 workspace 设为可写（连 `.git` 一起），插件不改这个默认值。副根比主根严，是因为副根本来就是本插件新增的授权。
 
 ## 验证
 
 ```bash
-node --test test/          # 58 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含右键菜单形状与失败提示）+ 真实 bwrap 收敛矩阵
+node --test test/          # 66 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含右键菜单形状与失败提示）/只读硬化（8 项）+ 真实 bwrap 收敛矩阵
+```
+
+未打宿主补丁时，`test/hardening.test.mjs` 的 3 项执行层用例**跳过**（不是通过）：那是一份能力报告，不是保证。打了补丁后同一套测试 8/8 全过——这正是判据「跳过会翻成通过」：
+
+```bash
+PAYLOAD=$HOME/dsh-host-spike node --test test/hardening.test.mjs   # 已打补丁：8 通过 0 跳过
+node --test test/hardening.test.mjs                                 # 实机未补丁：5 通过 3 跳过
 ```
 
 `test/project.test.mjs` 覆盖 0.2.0 的键变更：仓库根继承、兄弟仓库不继承、非仓库祖先不向下泄漏、`.git` 是文件（worktree）也算根、旧「精确 cwd」键被迁移且不留两份、运行期复验用会话 cwd 而不是落盘键。
