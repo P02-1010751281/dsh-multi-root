@@ -87,6 +87,10 @@
 - 设置页的数据路由必须注册在 `ctx.connection.fetch`（只对 owner peer 放行，其它主体 403），不得用 `ctx.webServer` 裸路由；每次写入都要过 `validateGrant` 并落审计（`surface: "settings"`）。
   - why：裸路由不经过 `/api` 的鉴权链，等于把「改可写根」暴露给任何能访问该端口的进程。
   - 判据：`grep -c "connection.fetch.register" lib/index.js` 为 1；`grep -n "webServer" lib/` 无输出。
+- 只读硬化只在宿主真的消费时才可宣称：`resolve()` 返回 `protectedPathsSupported: true` 才算生效，缺省时只警告、不假装。
+  - why：`protectedPaths` 是插件与载荷之间的**新契约**，老宿主会静默忽略未知字段；把「提交了字段」当成「已经挡住」正是本项目最不能犯的错。
+  - 判据：`grep -c "protectedPathsSupported" lib/index.js` 为 1；`node --test test/hardening.test.mjs` 在已打补丁的载荷上 8 通过 0 跳过、在未打补丁的载荷上 5 通过 3 跳过（跳过是能力报告，不是通过）。
+
 - 审计只追加：每次变更写一行 JSON 到 `audit.jsonl`，不重写历史、不回填。
   - why：审计要能被第三方复核「谁在何时授权了什么」，回填即失去证据力。
 
