@@ -41,3 +41,41 @@ test('the card is registered in the settings slot it declares', () => {
   assert.match(SOURCE, /name: 'settings\.section'/u)
   assert.match(SOURCE, /inject: \['slots'\]/u)
 })
+
+test('the bundle loads in a classic-script sandbox and registers the card', async () => {
+  const vm = await import('node:vm')
+  let captured
+  const sandbox = {
+    window: { __ModuleLoader__: { load: options => { captured = options } } },
+    console,
+  }
+  vm.runInNewContext(SOURCE, sandbox)
+  assert.ok(captured !== undefined, '必须调用 __ModuleLoader__.load')
+  assert.equal(captured.id, 'dsh-multi-root')
+  assert.equal(typeof captured.factory, 'function')
+
+  // 只用平台模块表里的 react，这里给出最小替身，验证 factory 返回的是 cordis 插件形状。
+  const React = {
+    createElement: () => null,
+    useState: value => [value, () => {}],
+    useEffect: () => {},
+    useCallback: fn => fn,
+  }
+  const plugin = captured.factory(name => (name === 'react' ? React : undefined))
+  // 跨 realm 数组的原型不同，deepEqual 会误报；按内容比较。
+  assert.equal(Array.from(plugin.inject).join(','), 'slots')
+  assert.equal(typeof plugin.apply, 'function')
+
+  const registered = []
+  plugin.apply({
+    slots: {
+      inject: (name, callback) => callback(),
+      register: (options, component) => registered.push({ options, component }),
+    },
+  })
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].options.name, 'settings.section')
+  assert.equal(registered[0].options.id, 'multi-root')
+  assert.equal(typeof registered[0].options.label(), 'string')
+  assert.equal(typeof registered[0].component, 'function')
+})
