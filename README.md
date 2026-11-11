@@ -83,6 +83,24 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 带 `workdir` 的命令仍应写副根的**绝对路径**——会话 cwd 没变，这是设计而非缺陷。
 
+## 设置页（桌面端与 Web 是同一个界面）
+
+**位置**：设置 → **多可写根**。
+
+卡片列出每个项目的**仓库根**及其下的可写根，逐条给出 ✓ / ✗（✗ 带原因）；可以就地填「项目目录 + 可写根」添加、逐条移除、手动刷新。改完立即生效，不需要重启宿主。
+
+| 环节 | 实现 |
+|---|---|
+| 浏览器半 | `lib/client.js`，手写的 lazy-CJS 经典脚本（`window.__ModuleLoader__.load({ id, factory })`），**无构建步骤**，只 `require` 宿主平台模块表里的 `react` |
+| 挂载点 | `settings.section`（宿主声明的 root-scope list slot），`id: multi-root` |
+| 数据路由 | `api/multi-root/roots`（文档相对路径），宿主半注册在 `ctx.connection.fetch`——**只对 owner peer 放行，其它主体 403** |
+| 写入校验 | 与 `/roots add` 同一条 `validateGrant`：拒绝相对路径、符号链接别名、home、当前工作区本身、包含关系 |
+| 审计 | 带 `surface: "settings"`，与斜杠命令的改动**可区分** |
+
+没有 `connection` 服务的宿主（headless）不会注册这个路由，卡片也就不出现，但**策略照常生效**——UI 是可选的一层，不是功能本身。
+
+`test/client.test.mjs` 守住浏览器半的契约：不许出现 `import`/`export`（经典脚本会静默不解析），`require` 只许是平台模块表里的名字。
+
 ## 自动发现（C2）
 
 `/roots discover` 只读扫描三个来源，按可信度排序并**编号**：
@@ -118,14 +136,14 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 ## 边界（明说）
 
 - **guard 是拦路，不是墙**：配置目录在 `$DSH_HOME` 下，正常项目会话够不到；若某个会话的 cwd 覆盖了 `$DSH_HOME`，插件会拒绝对该目录的 `write`/`edit`/`apply_patch` 与含该路径字面量的 `bash`/`pwsh`，但**运行时拼接路径绕过字符串扫描是检测不到的**。
-- 无 UI、无 `@` 文件菜单、无侧栏分组：侧栏仍按 cwd 归属一个工作区；`glob`/`grep` 用绝对路径本来就能到副根。
+- UI 只有一个设置页卡片（见上）：无 `@` 文件菜单、无侧栏面板、无工具栏按钮；侧栏仍按 cwd 归属一个工作区，`glob`/`grep` 用绝对路径本来就能到副根。
 - 与 `dsh-multi-folder` 这类「换根」插件**不能共存**：两边都改 policy，行为会打架。
 - 部署级 `additionalWritableRoots`（profile patch 里的 `sandbox-policy.config`）仍然生效，本插件是在其结果上**追加**并去重。
 
 ## 验证
 
 ```bash
-node --test test/          # 39 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定 测试 + 真实 bwrap 收敛矩阵
+node --test test/          # 51 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由/浏览器半契约 + 真实 bwrap 收敛矩阵
 ```
 
 `test/project.test.mjs` 覆盖 0.2.0 的键变更：仓库根继承、兄弟仓库不继承、非仓库祖先不向下泄漏、`.git` 是文件（worktree）也算根、旧「精确 cwd」键被迁移且不留两份、运行期复验用会话 cwd 而不是落盘键。

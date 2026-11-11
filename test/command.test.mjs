@@ -42,11 +42,21 @@ function fakeCtx() {
       return { mode: request.mode ?? 'workspace-write', workspaceRoot: typeof cwd === 'string' ? canonicalPath(cwd) : '/tmp' }
     },
   }
+  const routes = []
   const scope = {
     commands: { register: definition => commands.push(definition) },
     systemPrompt: {
       getContextOrder: () => 110,
       context: contribution => prompts.push(contribution),
+    },
+    effect: fn => fn(),
+    connection: {
+      fetch: {
+        register: route => {
+          routes.push(route)
+          return async () => {}
+        },
+      },
     },
   }
   const ctx = {
@@ -57,7 +67,7 @@ function fakeCtx() {
     inject: (deps, callback) => callback(scope),
     on: () => {},
   }
-  return { ctx, commands, prompts }
+  return { ctx, commands, prompts, routes }
 }
 
 function fixture() {
@@ -74,10 +84,13 @@ function invoke(def, cwd, rawInput) {
 }
 
 test('the plugin registers /roots and one prompt contribution', () => {
-  const { ctx, commands, prompts } = fakeCtx()
+  const { ctx, commands, prompts, routes } = fakeCtx()
   apply(ctx, { statePath: join(tmpdir(), 'dsh-multi-root-noop', 'roots.json') })
   assert.equal(commands.length, 1)
   assert.equal(commands[0].name, 'roots')
+  assert.equal(routes.length, 1, '设置页卡片的数据路由')
+  assert.equal(routes[0].path, '/api/multi-root/roots')
+  assert.deepEqual(routes[0].methods, ['GET', 'POST'])
   assert.equal(prompts.length, 1)
   assert.equal(prompts[0].name, 'dsh-multi-root')
 })

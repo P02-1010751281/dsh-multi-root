@@ -30,12 +30,14 @@
 - 单文件单一职责，行数上限：
   - `lib/canonical.js` —— 只放路径规范化，当前 35 行，上限 80；
   - `lib/project.js` —— 只放项目根锚定（向上找 `.git`），当前 40 行，上限 80；
+  - `lib/route.js` —— 只放设置页的数据路由（鉴权由宿主的 connection 桥提供），当前 117 行，上限 180；
+  - `lib/client.js` —— 只放浏览器半（经典脚本，见 §4），当前 176 行，上限 260；
   - `lib/discover.js` —— 只放候选发现，当前 191 行，上限 300；
   - `lib/state.js` —— 状态文件形状、准入校验、RootTable（含 prune），当前 333 行，上限 420；
   - `lib/policy.js` —— 只放 policy 合并与 resolve 包装，当前 84 行，上限 160；
   - `lib/guard.js` —— 只放状态目录守卫，当前 50 行，上限 120；
   - `lib/commands.js` —— `/roots` 参数解析、渲染与注册，当前 339 行，上限 430；
-  - `lib/index.js` —— 插件入口与装配，当前 132 行，上限 260；任一文件超上限，该次提交必须先拆模块再改功能。
+  - `lib/index.js` —— 插件入口与装配，当前 145 行，上限 260；任一文件超上限，该次提交必须先拆模块再改功能。
   - 判据：`wc -l lib/*.js`；任一文件超上限的提交必须同时出现新文件。
 - 测试文件名按被测面命名（`store`/`discover`/`command`/`enforce`），一个文件一个面，不按功能点碎切。
   - why：失败时能一眼判断哪条约束被破坏，而不是在一堆碎片文件里找入口。
@@ -44,10 +46,13 @@
 
 ## 4 子包与模块边界
 
-- 只暴露一个入口：`package.json` 的 `exports["."]` 指向 `./lib/index.js`；新增对外 API 要有 README 说明与测试。
+- 对外入口两个：`exports["."]` → `./lib/index.js`（宿主半），`exports["./client"]` → `./lib/client.js`（浏览器半）。新增对外 API 要有 README 说明与测试。
+  - 判据：`node -e 'console.log(Object.keys(require("./package.json").exports).join(","))'` 含 `.` 与 `./client`。
 - 不得改 `workspaceRoot`、不得重实现宿主工具、不得改宿主工具签名。
   - 判据：`grep -n 'workspaceRoot\s*=' lib/*.js` 无输出（只允许读）。
-- 依赖方向单向：`canonical.js` 是叶子；`project.js` 只依赖 `canonical.js`；`discover.js` / `guard.js` 只依赖 `canonical.js`；`state.js` 依赖 `canonical.js` + `project.js`；`policy.js` 不 import 任何模块；`commands.js` 依赖 `canonical.js` + `discover.js` + `state.js`；只有 `index.js` 依赖以上全部。反向 import 即设计错误。
+- 依赖方向单向：`canonical.js` 是叶子；`project.js` 只依赖 `canonical.js`；`discover.js` / `guard.js` 只依赖 `canonical.js`；`state.js` 依赖 `canonical.js` + `project.js`；`policy.js` 不 import 任何模块；`route.js` 依赖 `canonical.js` + `state.js`；`commands.js` 依赖 `canonical.js` + `discover.js` + `state.js`；只有 `index.js` 依赖以上全部。反向 import 即设计错误。
+  - `client.js` 是唯一例外：不 import 任何 `lib/` 文件，只能 `require` 宿主平台模块表里的名字，因为浏览器半由宿主原样下发。
+  - 判据：`test/client.test.mjs` 拒绝 `import`/`export` 语句与表外的 `require`。
   - why：反向依赖会把发现/命令逻辑缠进入口，各模块就无法脱离宿主与彼此单测。
   - 判据：`grep -rn "from './index.js'" lib/` 无输出；`grep -rln "from './project.js'" lib/` 只输出 `lib/state.js` 与 `lib/index.js`；`grep -rln "from './commands.js'\|from './policy.js'\|from './guard.js'" lib/` 只输出 `lib/index.js`；`grep -rln "from './state.js'" lib/` 只输出 `lib/commands.js` 与 `lib/index.js`。
 - 与「换根」类插件（如 `dsh-multi-folder`）互斥，禁止同时启用：两边都改 policy，行为会打架。
@@ -63,7 +68,7 @@
 
 ## 6 测试与质量门禁
 
-- 合并前提：`node --test test/` exit 0，39 项全绿（`pass 39 / fail 0`）。
+- 合并前提：`node --test test/` exit 0，51 项全绿（`pass 51 / fail 0`）。
 - 执行层不许 mock：`test/enforce.test.mjs` 必须 import 真实 `LocalSandboxProvider` 并 spawn 受限进程，覆盖五格矩阵（无副根拒绝 / 有副根放行 / 一条命令双写 / `read-only` 全拒 / 跨工作区不继承）。
 - 每个新行为必须带负向用例：只证明「放行」不算测过，必须同时证明「未授权时被拒」。
 - 改 policy 合并逻辑，必须同时改 `test/store.test.mjs`（隔离、复验、失效条目丢弃）与 README 验证表。
@@ -79,6 +84,9 @@
   - why：过度承诺会让使用者把安全寄托在字符串扫描上，而它本质只是防手滑。
 - 运行期复验失败必须**丢弃并告警**，不得让宿主的 `workspaceWritableRoots` 抛错把整个工作区的工具调用打瘫。
   - 判据：`test/store.test.mjs` 的「RootTable drops invalid entries」用例保持通过。
+- 设置页的数据路由必须注册在 `ctx.connection.fetch`（只对 owner peer 放行，其它主体 403），不得用 `ctx.webServer` 裸路由；每次写入都要过 `validateGrant` 并落审计（`surface: "settings"`）。
+  - why：裸路由不经过 `/api` 的鉴权链，等于把「改可写根」暴露给任何能访问该端口的进程。
+  - 判据：`grep -c "connection.fetch.register" lib/index.js` 为 1；`grep -n "webServer" lib/` 无输出。
 - 审计只追加：每次变更写一行 JSON 到 `audit.jsonl`，不重写历史、不回填。
   - why：审计要能被第三方复核「谁在何时授权了什么」，回填即失去证据力。
 
@@ -87,5 +95,6 @@
 - 禁止提交 `node_modules/`、`*.pre-*`、`*.bak`、本机绝对路径。
 - 禁止绕过门禁（`git commit --no-verify`、`node --test --test-skip-pattern` 全跳过等）；紧急豁免必须在 commit message 写明原因与回滚点。
 - 禁止在未上真桌面实测的情况下宣称某个 dsh 版本兼容；版本契约变化先验收再改文档。
-- 禁止把插件做成「多合一」工具（顺手加 UI、加换根、加文件菜单）；超出一个工作区的副根配置即越界。
-  - why：职责扩张会让版本契约、测试矩阵与文档同时失控，而宿主并不需要第二个策略层。
+- UI 只允许一个形态：设置页里的一张「多可写根」卡片 + 它专用的 `/api/multi-root/roots`。禁止加换根、`@` 文件菜单、侧栏面板、工具栏按钮或第二个数据路由。
+  - why：职责扩张会让版本契约、测试矩阵与文档同时失控；卡片只做「看和改这份配置」，不做别的。
+  - 判据：`grep -c "slots.inject('" lib/client.js` 为 1 且只出现 `settings.section`。
