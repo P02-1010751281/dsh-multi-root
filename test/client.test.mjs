@@ -173,6 +173,84 @@ test('the bundle loads in a classic-script sandbox and registers the card', asyn
   assert.equal(typeof menus[0].resolve, 'function')
 })
 
+/** A React stand-in that actually builds a tree, with the hook values supplied per call. */
+function treeReact(values) {
+  const queue = [...values]
+  return {
+    createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
+    useState: () => [queue.shift(), () => {}],
+    useEffect: () => {},
+    useCallback: fn => fn,
+  }
+}
+
+function flatten(node, sink = []) {
+  if (node === null || node === undefined || node === false || node === true) return sink
+  if (Array.isArray(node)) { for (const child of node) flatten(child, sink); return sink }
+  if (typeof node === 'object') {
+    for (const [key, value] of Object.entries(node.props)) {
+      if (typeof value === 'string' && (key === 'path' || key === 'placeholder' || key === 'aria-label' || key === 'title')) sink.push(value)
+    }
+    flatten(node.children, sink)
+    return sink
+  }
+  sink.push(String(node))
+  return sink
+}
+
+test('the card renders one group per project and the add row, not an empty shell', async () => {
+  const vm = await import('node:vm')
+  let captured
+  const sandbox = { window: { __ModuleLoader__: { load: options => { captured = options } } }, console }
+  vm.runInNewContext(SOURCE, sandbox)
+  // Hook order in Section: state, editing, anchor, path, busy.
+  const React = treeReact([
+    {
+      loading: false,
+      error: undefined,
+      data: {
+        statePath: '/state/roots.json',
+        anchors: [
+          { key: '/repo-a', roots: [{ path: '/repo-a/extra', ok: true }, { path: '/repo-a/bad', ok: false, error: '不是目录' }] },
+          { key: '/repo-b', roots: [] },
+        ],
+      },
+    },
+    false, '', '', false,
+  ])
+  const plugin = captured.factory(platformModules(React))
+  let card
+  plugin.apply({
+    slots: { inject: (name, callback) => callback(), register: (options, component) => { if (options.name === 'settings.section') card = component } },
+    contextMenus: { register: () => () => {}, notify: () => {} },
+  })
+  assert.equal(typeof card, 'function')
+
+  const text = flatten(card()).join('\n')
+  // 这一条是本轮真实缺陷的门禁：渲染树里必须出现每条根，而不只是外壳和添加行。
+  for (const expected of ['/repo-a', '/repo-a/extra', '/state/roots.json', '添加可写根', '（无，仅主根）', '不是目录']) {
+    assert.ok(text.includes(expected), `渲染结果里缺少：${expected}`)
+  }
+  assert.ok(text.includes('移除 /repo-a/extra'), '每行要有可访问名称的移除按钮')
+})
+
+test('the card renders the empty state when no project is configured', async () => {
+  const vm = await import('node:vm')
+  let captured
+  const sandbox = { window: { __ModuleLoader__: { load: options => { captured = options } } }, console }
+  vm.runInNewContext(SOURCE, sandbox)
+  const React = treeReact([{ loading: false, error: undefined, data: { statePath: '/state/roots.json', anchors: [] } }, false, '', '', false])
+  const plugin = captured.factory(platformModules(React))
+  let card
+  plugin.apply({
+    slots: { inject: (name, callback) => callback(), register: (options, component) => { if (options.name === 'settings.section') card = component } },
+    contextMenus: { register: () => () => {}, notify: () => {} },
+  })
+  const text = flatten(card()).join('\n')
+  assert.ok(text.includes('还没有项目配置副根。'), '空态文案必须在')
+  assert.ok(text.includes('添加可写根'), '空态也要能给第一条授权')
+})
+
 test('the menu resolves to in-place add/remove actions over the one route', async () => {
   const vm = await import('node:vm')
   let captured

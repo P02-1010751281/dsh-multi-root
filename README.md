@@ -102,7 +102,7 @@ cd ~/.dsh/profiles/desktop && pnpm update dsh-multi-root
 
 `test/client.test.mjs` 守住浏览器半的契约：不许出现 `import`/`export`（经典脚本会静默不解析），`require` 只许是平台模块表里的名字，**解构到的每个 primitives 符号都必须在宿主载荷的导出表里真实存在**（图标插槽这类契约一旦拼错，界面会静默少一块，而不是报错）。
 
-视觉上不另造一套：导航图标用宿主自己的 `PermissionIconWorkspaceWrite*`（选中/未选中两档），根条目用 `StateDot` + `PathLabel` + `Button` 渲染，状态由图标与色点承载，不再用 `✓`/`✗` 字符顶替图标——那样既缺图标，也把无障碍名称挤成了字符。
+视觉按 ChatGPT 设置页的列表分组来：小节标题小而淡，每个项目一个圆角容器，行间只用发丝线分隔，行首一个图标、行尾一个安静的图标按钮；「添加可写根」本身也是同一容器里的一行，点开才就地展开表单，不再在列表下方常驻一个双输入框表单。导航图标用宿主自己的 `PermissionIconWorkspaceWrite*`（选中/未选中两档）——那是这个 app 表示沙箱权限的既有语汇；行状态用 `StateDot`，路径用 `PathLabel`，动作按钮用 `Button`，不用 `✓`/`✗` 字符顶替图标。
 
 ## 项目右键菜单（同一份配置）
 
@@ -188,7 +188,7 @@ bash scripts/patch-host.sh --revert   # 从备份还原
 ## 验证
 
 ```bash
-node --test test/          # 67 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含图标插槽、primitives 符号对照、右键菜单形状与失败提示）/只读硬化（8 项）+ 真实 bwrap 收敛矩阵
+node --test test/          # 69 项：状态/准入/守卫/发现/采纳/清理/命令处理器/项目锚定/数据路由（含 discover 只读）/浏览器半契约（含图标插槽、primitives 符号对照、卡片渲染树、右键菜单形状与失败提示）/只读硬化（8 项）+ 真实 bwrap 收敛矩阵
 ```
 
 未打宿主补丁时，`test/hardening.test.mjs` 的 3 项执行层用例**跳过**（不是通过）：那是一份能力报告，不是保证。打了补丁后同一套测试 8/8 全过——这正是判据「跳过会翻成通过」：
